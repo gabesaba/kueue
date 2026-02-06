@@ -64,6 +64,7 @@ import (
 	"sigs.k8s.io/kueue/pkg/controller/core/indexer"
 	"sigs.k8s.io/kueue/pkg/controller/failurerecovery"
 	"sigs.k8s.io/kueue/pkg/controller/jobframework"
+	qctrl "sigs.k8s.io/kueue/pkg/controller/queue"
 	"sigs.k8s.io/kueue/pkg/controller/tas"
 	tasindexer "sigs.k8s.io/kueue/pkg/controller/tas/indexer"
 	dispatcher "sigs.k8s.io/kueue/pkg/controller/workloaddispatcher"
@@ -384,6 +385,9 @@ func setupIndexes(ctx context.Context, mgr ctrl.Manager, cfg *configapi.Configur
 func setupControllers(ctx context.Context, mgr ctrl.Manager, cCache *schdcache.Cache, queues *qcache.Manager, cfg *configapi.Configuration, serverVersionFetcher *kubeversion.ServerVersionFetcher, roleTracker *roletracker.RoleTracker) error {
 	if failedCtrl, err := core.SetupControllers(mgr, queues, cCache, cfg, roleTracker); err != nil {
 		return fmt.Errorf("unable to create controller %s: %w", failedCtrl, err)
+	}
+	if err := qctrl.SetupControllers(mgr, queues); err != nil {
+		return fmt.Errorf("unable to create queue controllers: %w", err)
 	}
 	if features.Enabled(features.FailureRecoveryPolicy) {
 		if failedCtrlName, err := failurerecovery.SetupControllers(mgr, cfg, roleTracker); err != nil {

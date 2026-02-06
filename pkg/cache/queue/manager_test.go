@@ -263,7 +263,7 @@ func TestRequeueWorkloadsCohortCycle(t *testing.T) {
 
 	// This method is where we do a cycle check. We call it to ensure
 	// it behaves properly when a cycle exists
-	if manager.requeueWorkloadsCohort(ctx, manager.hm.Cohort("cohort-a")) {
+	if manager.RequeueCohort(ctx, "cohort-a") {
 		t.Fatal("Expected moveWorkloadsCohort to return false")
 	}
 	if diff := cmp.Diff(expectedAssigned, manager.workloadAssignedQueues); diff != "" {
@@ -378,7 +378,7 @@ func TestQueueInadmissibleWorkloads(t *testing.T) {
 			// Reset the counter before testing. Setup operations also trigger the log.
 			moveWorkloadsLogCount = 0
 
-			manager.QueueInadmissibleWorkloads(ctx, tc.cqNames)
+			manager.NotifyInadmissibleWorkloads(tc.cqNames)
 
 			if diff := cmp.Diff(tc.wantInadmissible, manager.DumpInadmissible()); diff != "" {
 				t.Errorf("Unexpected inadmissible workloads (-want +got):\n%s", diff)

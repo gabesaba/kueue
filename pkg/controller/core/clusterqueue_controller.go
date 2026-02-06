@@ -495,7 +495,7 @@ func (h *cqNamespaceHandler) Update(ctx context.Context, e event.UpdateEvent, _ 
 			cqs.Insert(cq)
 		}
 	}
-	h.qManager.QueueInadmissibleWorkloads(ctx, cqs)
+	h.qManager.NotifyInadmissibleWorkloads(cqs)
 }
 
 func (h *cqNamespaceHandler) Delete(context.Context, event.DeleteEvent, workqueue.TypedRateLimitingInterface[reconcile.Request]) {

@@ -15,6 +15,8 @@
 package util
 
 import (
+	"time"
+
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	qcache "sigs.k8s.io/kueue/pkg/cache/queue"
@@ -22,5 +24,8 @@ import (
 
 // NewManagerForIntegrationTests is a factory for cache.queue.Manager for Integration Tests.
 func NewManagerForIntegrationTests(client client.Client, checker qcache.StatusChecker, options ...qcache.Option) *qcache.Manager {
+	requeuer := qcache.NewInadmissibleWorkloadRequeuerWithBatchPeriod(100 * time.Millisecond)
+	options = append(options, qcache.WithInadmissibleRequeuer(requeuer))
+
 	return qcache.NewManager(client, checker, options...)
 }

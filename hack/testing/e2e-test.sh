@@ -68,6 +68,11 @@ if [ "$E2E_RUN_ONLY_ENV" = "true" ]; then
   exit 0
 fi
 
-# shellcheck disable=SC2086
-$GINKGO $GINKGO_ARGS --junit-report=junit.xml --json-report=e2e.json --output-dir="$ARTIFACTS" -v ./test/e2e/$E2E_TARGET_FOLDER/...
+# Use a bash array to parse GINKGO_ARGS to correctly handle quoted arguments with spaces.
+GINKGO_EXTRA_ARGS=()
+if [[ -n "${GINKGO_ARGS:-}" ]]; then
+    eval "GINKGO_EXTRA_ARGS+=($GINKGO_ARGS)"
+fi
+
+"${GINKGO}" "${GINKGO_EXTRA_ARGS[@]}" --junit-report=junit.xml --json-report=e2e.json --output-dir="$ARTIFACTS" -v ./test/e2e/$E2E_TARGET_FOLDER/...
 "$ROOT_DIR/bin/ginkgo-top" -i "$ARTIFACTS/e2e.json" > "$ARTIFACTS/e2e-top.yaml"

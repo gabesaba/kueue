@@ -1,0 +1,21 @@
+# Performance expectations for the unschedulable workload scenario.
+# These are initial estimates and should be calibrated after trial runs.
+#
+# Key assertion: pods-only workloads get admitted promptly despite being
+# lower priority than the inadmissible needs-cpu workloads.
+# needs-cpu workloads are intentionally excluded — they will never be
+# admitted since there is no CPU available to borrow.
+cmd:
+  maxWallMs: 300_000
+
+clusterQueueClassesMinUsage:
+  # capacity-cq should be near-fully utilized (500 × 200m = 100 CPU)
+  capacity-cq: 90 #%
+
+wlClassesMaxAvgTimeToAdmissionMs:
+  # pods-only must be admitted quickly — this is the whole point of the test.
+  # If inadmissible workloads are blocking them, this will blow up.
+  pods-only: 15_000
+
+  # cpu-hog workloads admitted against capacity-cq's own quota
+  cpu-hog: 10_000

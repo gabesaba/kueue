@@ -1,0 +1,69 @@
+# Scheduler Performance Test Configuration
+# Unschedulable workload scenario with fair sharing and preemption.
+#
+# Tests that high-priority inadmissible workloads do not block lower-priority
+# admissible ones from being scheduled. After the inadmissible requeue
+# frequency fix, the scheduler should skip past the stuck workloads and
+# admit the ones it can, keeping cluster utilization high.
+#
+# One cohort, two cluster queues:
+# - borrower-cq: no CPU capacity, 1000 pod capacity. Mix of:
+#     - needs-cpu (priority 200): requests CPU but can't borrow any,
+#       stays inadmissible.
+#     - pods-only (priority 50): no CPU request, should be admitted
+#       promptly against the pod quota despite being lower priority.
+# - capacity-cq: 100 CPU capacity, fully saturated by its own workloads.
+#
+# Run with --enableFairSharing to enable fair sharing.
+
+cohorts:
+  - className: cohort
+    count: 1
+    queuesSets:
+      # CQ1: borrows only for CPU, owns pod capacity
+      - className: borrower-cq
+        count: 1
+        resources:
+          - name: pods
+            nominalQuota: 1000
+          - name: cpu
+            nominalQuota: 0
+            borrowingLimit: 100
+        reclaimWithinCohort: Any
+        withinClusterQueue: LowerPriority
+        workloadsSets:
+          # Inadmissible: high priority, needs CPU, but nothing to borrow.
+          # These should NOT block the lower-priority admissible workloads.
+          - count: 200
+            creationIntervalMs: 50
+            workloads:
+              - className: needs-cpu
+                runtimeMs: 500
+                priority: 200
+                request: 200m
+          # Admissible: lower priority, pods only, no CPU request.
+          # These SHOULD be admitted promptly despite being behind the
+          # higher-priority inadmissible workloads in the queue.
+          - count: 100
+            creationIntervalMs: 100
+            workloads:
+              - className: pods-only
+                runtimeMs: 5000
+                priority: 50
+
+      # CQ2: owns all CPU capacity, using it all
+      - className: capacity-cq
+        count: 1
+        resources:
+          - name: cpu
+            nominalQuota: 100
+        reclaimWithinCohort: Any
+        withinClusterQueue: LowerPriority
+        workloadsSets:
+          - count: 500
+            creationIntervalMs: 10
+            workloads:
+              - className: cpu-hog
+                runtimeMs: 60000
+                priority: 500
+                request: 200m

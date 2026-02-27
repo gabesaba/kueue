@@ -55,7 +55,8 @@ var (
 
 	metricsPort = flag.Int("metricsPort", 0, "metrics serving port")
 
-	enableTAS = flag.Bool("enableTAS", false, "enable TAS controllers and indexers")
+	enableTAS          = flag.Bool("enableTAS", false, "enable TAS controllers and indexers")
+	enableFairSharing  = flag.Bool("enableFairSharing", false, "enable fair sharing")
 )
 
 var (
@@ -196,15 +197,24 @@ func run() int {
 	go queues.CleanUpOnContext(ctx)
 	go cCache.CleanUpOnContext(ctx)
 
+	// Build configuration
+	configuration := &configapi.Configuration{}
+	var schedulerOpts []scheduler.Option
+	if *enableFairSharing {
+		log.Info("Fair sharing enabled")
+		configuration.FairSharing = &configapi.FairSharing{}
+		schedulerOpts = append(schedulerOpts, scheduler.WithFairSharing(configuration.FairSharing))
+	}
+
 	// Setup core controllers
-	if failedCtrl, err := core.SetupControllers(mgr, queues, cCache, &configapi.Configuration{}, nil); err != nil {
+	if failedCtrl, err := core.SetupControllers(mgr, queues, cCache, configuration, nil); err != nil {
 		log.Error(err, "Unable to create core controller", "controller", failedCtrl)
 		return 1
 	}
 
 	// Setup TAS controllers if enabled
 	if *enableTAS {
-		if failedCtrl, err := tas.SetupControllers(mgr, queues, cCache, &configapi.Configuration{}, nil); err != nil {
+		if failedCtrl, err := tas.SetupControllers(mgr, queues, cCache, configuration, nil); err != nil {
 			log.Error(err, "Unable to create TAS controller", "controller", failedCtrl)
 			return 1
 		}
@@ -215,6 +225,7 @@ func run() int {
 		cCache,
 		mgr.GetClient(),
 		mgr.GetEventRecorderFor(constants.AdmissionName),
+		schedulerOpts...,
 	)
 
 	if err := mgr.Add(sched); err != nil {

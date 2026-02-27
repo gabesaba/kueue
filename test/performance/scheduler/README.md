@@ -135,3 +135,97 @@ cohorts:
 ```
 
 Performance thresholds are defined in `configs/tas/rangespec.yaml`.
+
+## Unschedulable Workloads Test
+
+Tests that high-priority inadmissible workloads do not block lower-priority
+admissible ones from being scheduled. This validates the inadmissible workload
+requeue frequency fix: previously, inadmissible workloads would repeatedly
+enter the scheduling cycle and block admissible ones behind them, wasting
+cluster capacity. After the fix, the scheduler requeues them less frequently,
+letting admissible workloads through.
+
+### Scenario
+
+One cohort with two ClusterQueues:
+
+- **borrower-cq**: No CPU capacity of its own, relies on borrowing. Has 1000
+  pod capacity. Submits two kinds of workloads:
+  - *needs-cpu* (priority 200): Requests 200m CPU, must borrow from the
+    cohort. Because `capacity-cq` is fully utilizing its CPU, these remain
+    permanently inadmissible. 200 of these are created to apply pressure.
+  - *pods-only* (priority 50): No CPU request, should be admitted promptly
+    against the pod quota **despite being lower priority** than the
+    inadmissible workloads ahead of them in the queue.
+- **capacity-cq**: Owns 100 CPU. Submits 500 workloads each requesting 200m
+  CPU (total = 100 CPU), fully saturating its own quota. Nothing is left for
+  `borrower-cq` to borrow.
+
+Fair sharing is enabled so the scheduler evaluates fair share ratios when
+making preemption decisions. Preemption is set to `reclaimWithinCohort: Any`
+and `withinClusterQueue: LowerPriority` on both CQs.
+
+### What the test validates
+
+- **pods-only time-to-admission**: The key metric. If inadmissible workloads
+  are blocking them, this will be very high or they'll never be admitted.
+- **capacity-cq usage**: Should be near 100% — `cpu-hog` workloads fill it.
+- **needs-cpu**: Intentionally excluded from admission time checks. They will
+  never be admitted.
+
+### Run unschedulable workload tests
+
+```bash
+# Run with minimalkueue in envtest
+make run-unschedulable-performance-scheduler
+
+# Run in existing cluster
+make run-unschedulable-performance-scheduler-in-cluster
+
+# Run and validate against thresholds
+make test-unschedulable-performance-scheduler
+```
+
+Same environment variables as standard tests apply (`SCALABILITY_CPU_PROFILE`,
+`SCALABILITY_KUEUE_LOGS`, etc.).
+Results are stored in `$(PROJECT_DIR)/bin/run-unschedulable-performance-scheduler/`.
+
+### Configuration
+
+The config (`configs/unschedulable/generator.yaml`) uses the `resources` field
+for per-resource quotas instead of the legacy single-resource `nominalQuota`
+field:
+
+```yaml
+queuesSets:
+  - className: borrower-cq
+    resources:
+      - name: pods
+        nominalQuota: 1000
+      - name: cpu
+        nominalQuota: 0
+        borrowingLimit: 100
+    workloadsSets:
+      # High priority but inadmissible — should not block the queue
+      - count: 200
+        workloads:
+          - className: needs-cpu
+            priority: 200
+            request: 200m
+      # Lower priority but admissible — should get through
+      - count: 100
+        workloads:
+          - className: pods-only
+            priority: 50
+```
+
+The `resources` list maps directly to Kueue's `FlavorQuotas.Resources`. Each
+entry supports `name`, `nominalQuota`, `borrowingLimit`, and `lendingLimit`.
+When `resources` is omitted, the legacy behavior applies (single CPU resource
+from `nominalQuota`/`borrowingLimit`).
+
+Workloads with no `request` field get no CPU resource request in their spec.
+The scheduler automatically accounts for `pods` usage based on podSet count
+when the CQ has `pods` in its resource group.
+
+Performance thresholds are defined in `configs/unschedulable/rangespec.yaml`.

@@ -326,3 +326,130 @@ cohorts:
 		t.Errorf("expected podCount 16, got %d", wl.PodCount)
 	}
 }
+
+func TestLoadConfig_UnschedulableScenario(t *testing.T) {
+	testContent := `
+cohorts:
+  - className: cohort
+    count: 1
+    queuesSets:
+      - className: borrower-cq
+        count: 1
+        resources:
+          - name: pods
+            nominalQuota: 1000
+          - name: cpu
+            nominalQuota: 0
+            borrowingLimit: 100
+        reclaimWithinCohort: Any
+        withinClusterQueue: LowerPriority
+        workloadsSets:
+          - count: 200
+            creationIntervalMs: 50
+            workloads:
+              - className: needs-cpu
+                runtimeMs: 500
+                priority: 200
+                request: 200m
+          - count: 100
+            creationIntervalMs: 100
+            workloads:
+              - className: pods-only
+                runtimeMs: 5000
+                priority: 50
+      - className: capacity-cq
+        count: 1
+        resources:
+          - name: cpu
+            nominalQuota: 100
+        reclaimWithinCohort: Any
+        withinClusterQueue: LowerPriority
+        workloadsSets:
+          - count: 500
+            creationIntervalMs: 10
+            workloads:
+              - className: cpu-hog
+                runtimeMs: 60000
+                priority: 500
+                request: 200m
+`
+	tempDir := t.TempDir()
+	fPath := filepath.Join(tempDir, "config.yaml")
+	if err := os.WriteFile(fPath, []byte(testContent), os.FileMode(0600)); err != nil {
+		t.Fatalf("unable to create test file: %v", err)
+	}
+
+	got, err := LoadConfig(fPath)
+	if err != nil {
+		t.Fatalf("unexpected load error: %v", err)
+	}
+
+	if len(got.Cohorts) != 1 {
+		t.Fatalf("expected 1 cohort, got %d", len(got.Cohorts))
+	}
+
+	cohort := got.Cohorts[0]
+	if len(cohort.QueuesSets) != 2 {
+		t.Fatalf("expected 2 queueSets, got %d", len(cohort.QueuesSets))
+	}
+
+	// Verify borrower CQ with multi-resource config
+	borrower := cohort.QueuesSets[0]
+	if borrower.ClassName != "borrower-cq" {
+		t.Errorf("expected className 'borrower-cq', got %q", borrower.ClassName)
+	}
+	if len(borrower.Resources) != 2 {
+		t.Fatalf("expected 2 resources in borrower, got %d", len(borrower.Resources))
+	}
+	if borrower.Resources[0].Name != "pods" {
+		t.Errorf("expected first resource 'pods', got %q", borrower.Resources[0].Name)
+	}
+	if borrower.Resources[0].NominalQuota != "1000" {
+		t.Errorf("expected pods nominalQuota '1000', got %q", borrower.Resources[0].NominalQuota)
+	}
+	if borrower.Resources[1].Name != "cpu" {
+		t.Errorf("expected second resource 'cpu', got %q", borrower.Resources[1].Name)
+	}
+	if borrower.Resources[1].BorrowingLimit != "100" {
+		t.Errorf("expected cpu borrowingLimit '100', got %q", borrower.Resources[1].BorrowingLimit)
+	}
+	if len(borrower.WorkloadsSets) != 2 {
+		t.Fatalf("expected 2 workloadsSets in borrower, got %d", len(borrower.WorkloadsSets))
+	}
+
+	// Inadmissible workloads: high priority, request CPU
+	needsCPU := borrower.WorkloadsSets[0].Workloads[0]
+	if needsCPU.ClassName != "needs-cpu" {
+		t.Errorf("expected className 'needs-cpu', got %q", needsCPU.ClassName)
+	}
+	if needsCPU.Priority != 200 {
+		t.Errorf("expected priority 200, got %d", needsCPU.Priority)
+	}
+	if needsCPU.Request != "200m" {
+		t.Errorf("expected request '200m', got %q", needsCPU.Request)
+	}
+
+	// Admissible workloads: lower priority, no CPU request
+	podsOnly := borrower.WorkloadsSets[1].Workloads[0]
+	if podsOnly.ClassName != "pods-only" {
+		t.Errorf("expected className 'pods-only', got %q", podsOnly.ClassName)
+	}
+	if podsOnly.Priority != 50 {
+		t.Errorf("expected priority 50, got %d", podsOnly.Priority)
+	}
+	if podsOnly.Request != "" {
+		t.Errorf("expected empty request for pods-only, got %q", podsOnly.Request)
+	}
+
+	// Verify capacity CQ
+	capacity := cohort.QueuesSets[1]
+	if capacity.ClassName != "capacity-cq" {
+		t.Errorf("expected className 'capacity-cq', got %q", capacity.ClassName)
+	}
+	if len(capacity.Resources) != 1 {
+		t.Fatalf("expected 1 resource in capacity, got %d", len(capacity.Resources))
+	}
+	if capacity.Resources[0].NominalQuota != "100" {
+		t.Errorf("expected nominalQuota '100', got %q", capacity.Resources[0].NominalQuota)
+	}
+}

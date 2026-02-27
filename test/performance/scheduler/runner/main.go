@@ -75,7 +75,8 @@ var (
 	withLogs         = flag.Bool("withLogs", false, "capture minimalkueue logs")
 	logLevel         = flag.Int("withLogsLevel", 2, "set minimalkueue logs level")
 	logToFile        = flag.Bool("logToFile", false, "capture minimalkueue logs to files")
-	enableTAS        = flag.Bool("enableTAS", false, "enable TAS controllers and indexers in minimalkueue")
+	enableTAS          = flag.Bool("enableTAS", false, "enable TAS controllers and indexers in minimalkueue")
+	enableFairSharing  = flag.Bool("enableFairSharing", false, "enable fair sharing in minimalkueue")
 )
 
 var (
@@ -167,7 +168,7 @@ func main() {
 		}
 
 		// start the minimal kueue manager process
-		err = runCommand(ctx, *outputDir, *minimalKueuePath, "kubeconfig", *withCPUProfile, *withLogs, *logToFile, *logLevel, *enableTAS, errCh, wg, metricsPort)
+		err = runCommand(ctx, *outputDir, *minimalKueuePath, "kubeconfig", *withCPUProfile, *withLogs, *logToFile, *logLevel, *enableTAS, *enableFairSharing, errCh, wg, metricsPort)
 		if err != nil {
 			log.Error(err, "MinimalKueue start")
 			os.Exit(1)
@@ -262,7 +263,7 @@ func main() {
 	}
 }
 
-func runCommand(ctx context.Context, workDir, cmdPath, kubeconfig string, withCPUProf, withLogs, logToFile bool, logLevel int, enableTAS bool, errCh chan<- error, wg *sync.WaitGroup, metricsPort int) error {
+func runCommand(ctx context.Context, workDir, cmdPath, kubeconfig string, withCPUProf, withLogs, logToFile bool, logLevel int, enableTAS, enableFairSharing bool, errCh chan<- error, wg *sync.WaitGroup, metricsPort int) error {
 	log := ctrl.LoggerFrom(ctx).WithName("Run command")
 
 	cmd := exec.CommandContext(ctx, cmdPath, "--kubeconfig", filepath.Join(workDir, kubeconfig))
@@ -303,6 +304,10 @@ func runCommand(ctx context.Context, workDir, cmdPath, kubeconfig string, withCP
 
 	if enableTAS {
 		cmd.Args = append(cmd.Args, "--enableTAS")
+	}
+
+	if enableFairSharing {
+		cmd.Args = append(cmd.Args, "--enableFairSharing")
 	}
 
 	log.Info("Starting process", "path", cmd.Path, "args", cmd.Args)

@@ -57,11 +57,19 @@ type WorkloadsSet struct {
 	Workloads          []WorkloadTemplate `json:"workloads"`
 }
 
+type ResourceQuotaConfig struct {
+	Name           string `json:"name"`
+	NominalQuota   string `json:"nominalQuota"`
+	BorrowingLimit string `json:"borrowingLimit"`
+	LendingLimit   string `json:"lendingLimit"`
+}
+
 type QueuesSet struct {
 	ClassName           string                 `json:"className"`
 	Count               int                    `json:"count"`
 	NominalQuota        string                 `json:"nominalQuota"`
 	BorrowingLimit      string                 `json:"borrowingLimit"`
+	Resources           []ResourceQuotaConfig  `json:"resources,omitempty"`
 	ReclaimWithinCohort kueue.PreemptionPolicy `json:"reclaimWithinCohort"`
 	WithinClusterQueue  kueue.PreemptionPolicy `json:"withinClusterQueue"`
 	WorkloadsSets       []WorkloadsSet         `json:"workloadsSets"`
@@ -177,7 +185,7 @@ func generateWlSet(ctx context.Context, c client.Client, wlSet WorkloadsSet, nam
 				}
 
 				wlBuilder = wlBuilder.PodSets(*podSetBuilder.Obj())
-			} else {
+			} else if wlt.Request != "" {
 				// Standard mode: simple request without PodSet
 				wlBuilder = wlBuilder.Request(corev1.ResourceCPU, wlt.Request)
 			}
@@ -196,10 +204,17 @@ func generateQueue(ctx context.Context, c client.Client, qSet QueuesSet, cohortN
 	log := ctrl.LoggerFrom(ctx).WithName("generate queue").WithValues("idx", queueIndex, "prefix", qSet.ClassName)
 	log.Info("Start generation")
 	defer log.Info("End generation")
+	flavorQuotas := utiltestingapi.MakeFlavorQuotas(flavorName)
+	if len(qSet.Resources) > 0 {
+		for _, r := range qSet.Resources {
+			flavorQuotas = flavorQuotas.Resource(corev1.ResourceName(r.Name), r.NominalQuota, r.BorrowingLimit, r.LendingLimit)
+		}
+	} else {
+		flavorQuotas = flavorQuotas.Resource(corev1.ResourceCPU, qSet.NominalQuota, qSet.BorrowingLimit)
+	}
 	cq := utiltestingapi.MakeClusterQueue(fmt.Sprintf("%s-%d-%d-%s", qSet.ClassName, queueSetIdx, queueIndex, cohortName)).
 		Cohort(cohortName).
-		ResourceGroup(*utiltestingapi.MakeFlavorQuotas(flavorName).
-			Resource(corev1.ResourceCPU, qSet.NominalQuota, qSet.BorrowingLimit).Obj()).
+		ResourceGroup(*flavorQuotas.Obj()).
 		Preemption(kueue.ClusterQueuePreemption{
 			ReclaimWithinCohort: qSet.ReclaimWithinCohort,
 			WithinClusterQueue:  qSet.WithinClusterQueue,

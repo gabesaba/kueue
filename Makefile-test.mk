@@ -447,6 +447,42 @@ run-tas-performance-scheduler-in-cluster: envtest performance-scheduler-runner
 		--enableTAS=true \
 		--qps=1000 --burst=2000 --timeout=25m $(SCALABILITY_SCRAPE_ARGS)
 
+##@ Scheduler Performance Testing with Unschedulable Workloads
+
+SCALABILITY_UNSCHEDULABLE_GENERATOR_CONFIG ?= $(PROJECT_DIR)/test/performance/scheduler/configs/unschedulable/generator.yaml
+SCALABILITY_UNSCHEDULABLE_RANGE_FILE ?= $(PROJECT_DIR)/test/performance/scheduler/configs/unschedulable/rangespec.yaml
+
+.PHONY: run-unschedulable-performance-scheduler
+run-unschedulable-performance-scheduler: envtest performance-scheduler-runner minimalkueue
+	mkdir -p $(ARTIFACTS)
+	KUBEBUILDER_ASSETS="$(shell $(ENVTEST) use $(ENVTEST_K8S_VERSION) -p path)" \
+	$(SCALABILITY_RUNNER) \
+		--o $(ARTIFACTS) \
+		--crds=$(PROJECT_DIR)/config/components/crd/bases \
+		--generatorConfig=$(SCALABILITY_UNSCHEDULABLE_GENERATOR_CONFIG) \
+		--minimalKueue=$(MINIMALKUEUE_RUNNER) \
+		--enableFairSharing=true $(SCALABILITY_EXTRA_ARGS) $(SCALABILITY_SCRAPE_ARGS)
+
+.PHONY: test-unschedulable-performance-scheduler-once
+test-unschedulable-performance-scheduler-once: gotestsum run-unschedulable-performance-scheduler
+	$(GOTESTSUM) --junitfile $(ARTIFACTS)/junit.xml -- $(GO_TEST_FLAGS) ./test/performance/scheduler/checker  \
+		--summary=$(ARTIFACTS)/summary.yaml \
+		--cmdStats=$(ARTIFACTS)/minimalkueue.stats.yaml \
+		--range=$(SCALABILITY_UNSCHEDULABLE_RANGE_FILE)
+
+.PHONY: test-unschedulable-performance-scheduler
+test-unschedulable-performance-scheduler:
+	ARTIFACTS="$(ARTIFACTS)/$@" ./hack/testing/performance-test.sh $(PERFORMANCE_RETRY_COUNT) test-unschedulable-performance-scheduler-once
+
+.PHONY: run-unschedulable-performance-scheduler-in-cluster
+run-unschedulable-performance-scheduler-in-cluster: envtest performance-scheduler-runner
+	mkdir -p "$(ARTIFACTS)/$@"
+	KUBEBUILDER_ASSETS="$(shell $(ENVTEST) use $(ENVTEST_K8S_VERSION) -p path)" \
+	$(SCALABILITY_RUNNER) \
+		--o "$(ARTIFACTS)/$@" \
+		--generatorConfig=$(SCALABILITY_UNSCHEDULABLE_GENERATOR_CONFIG) \
+		--qps=1000 --burst=2000 --timeout=15m $(SCALABILITY_SCRAPE_ARGS)
+
 .PHONY: ginkgo-top
 ginkgo-top:
 	cd $(TOOLS_DIR) && go mod download && \

@@ -382,6 +382,8 @@ var defaultVersionedFeatureGates = map[featuregate.Feature]featuregate.Versioned
 		{Version: version.MustParse("0.17"), Default: true, PreRelease: featuregate.Beta},
 	},
 	FairSharingPrioritizeNonBorrowing: {
+		// set to false, and run
+		// go test ./pkg/scheduler/ -run "TestSchedule/with_fair_sharing:_hierarchical_nominal-first" -count=1
 		{Version: version.MustParse("0.17"), Default: true, PreRelease: featuregate.Beta},
 	},
 	MultiKueue: {

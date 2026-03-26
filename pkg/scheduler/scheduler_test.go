@@ -3110,6 +3110,155 @@ func TestSchedule(t *testing.T) {
 				"fs-nom-b": {"eng-beta/borrow-wl"},
 			},
 		},
+		//            ROOT (no quota)
+		//          /              \
+		//   COHORT-A (10 CPUs)    COHORT-B (no quota)
+		//        |                /         \
+		//      cq-a (0)       cq-b (5)    cq-c (0)
+		//                                  admitted: 10 CPUs
+		//
+		// cq-c's admitted workload makes Cohort-B borrow
+		// from root (DRS=high), while Cohort-A has DRS=0.
+		//
+		// wl-a (cq-a, 5 CPUs): borrows from Cohort-A locally.
+		// wl-b (cq-b, 5 CPUs): fits within cq-b's 5 nominal.
+		//
+		// At the root tournament, DRS should prefer wl-a (Cohort-A
+		// is the less utilized subcohort). FairSharingPrioritizeNonBorrowing
+		// prefers wl-b because it checks CQ-level
+		// borrowing at the root-level comparison.
+		"with fair sharing: hierarchical nominal-first should not override DRS at root tournament level": {
+			enableFairSharing: true,
+			cohorts: []kueue.Cohort{
+				*utiltestingapi.MakeCohort("root").Obj(),
+				*utiltestingapi.MakeCohort("Cohort-A").
+					ResourceGroup(
+						*utiltestingapi.MakeFlavorQuotas("on-demand").
+							Resource(corev1.ResourceCPU, "10").Obj(),
+					).Parent("root").Obj(),
+				*utiltestingapi.MakeCohort("Cohort-B").Parent("root").Obj(),
+			},
+			additionalClusterQueues: []kueue.ClusterQueue{
+				*utiltestingapi.MakeClusterQueue("cq-a").
+					Cohort("Cohort-A").
+					ResourceGroup(
+						*utiltestingapi.MakeFlavorQuotas("on-demand").
+							Resource(corev1.ResourceCPU, "0").Obj(),
+					).Obj(),
+				*utiltestingapi.MakeClusterQueue("cq-b").
+					Cohort("Cohort-B").
+					ResourceGroup(
+						*utiltestingapi.MakeFlavorQuotas("on-demand").
+							Resource(corev1.ResourceCPU, "5").Obj(),
+					).Obj(),
+				*utiltestingapi.MakeClusterQueue("cq-c").
+					Cohort("Cohort-B").
+					ResourceGroup(
+						*utiltestingapi.MakeFlavorQuotas("on-demand").
+							Resource(corev1.ResourceCPU, "0").Obj(),
+					).Obj(),
+			},
+			additionalLocalQueues: []kueue.LocalQueue{
+				*utiltestingapi.MakeLocalQueue("lq-a", "eng-alpha").ClusterQueue("cq-a").Obj(),
+				*utiltestingapi.MakeLocalQueue("lq-b", "eng-alpha").ClusterQueue("cq-b").Obj(),
+				*utiltestingapi.MakeLocalQueue("lq-c", "eng-alpha").ClusterQueue("cq-c").Obj(),
+			},
+			workloads: []kueue.Workload{
+				*utiltestingapi.MakeWorkload("c0", "eng-alpha").
+					Queue("lq-c").
+					PodSets(*utiltestingapi.MakePodSet("one", 1).
+						Request(corev1.ResourceCPU, "10").
+						Obj()).
+					ReserveQuotaAt(utiltestingapi.MakeAdmission("cq-c", "one").
+						PodSets(utiltestingapi.MakePodSetAssignment("one").
+							Assignment(corev1.ResourceCPU, "on-demand", "10").
+							Obj()).
+						Obj(), now).
+					Obj(),
+				*utiltestingapi.MakeWorkload("wl-a", "eng-alpha").
+					Queue("lq-a").
+					PodSets(*utiltestingapi.MakePodSet("one", 1).
+						Request(corev1.ResourceCPU, "5").
+						Obj()).
+					Obj(),
+				*utiltestingapi.MakeWorkload("wl-b", "eng-alpha").
+					Queue("lq-b").
+					PodSets(*utiltestingapi.MakePodSet("one", 1).
+						Request(corev1.ResourceCPU, "5").
+						Obj()).
+					Obj(),
+			},
+			wantWorkloads: []kueue.Workload{
+				*utiltestingapi.MakeWorkload("c0", "eng-alpha").
+					Queue("lq-c").
+					PodSets(*utiltestingapi.MakePodSet("one", 1).
+						Request(corev1.ResourceCPU, "10").
+						Obj()).
+					ReserveQuotaAt(utiltestingapi.MakeAdmission("cq-c", "one").
+						PodSets(utiltestingapi.MakePodSetAssignment("one").
+							Assignment(corev1.ResourceCPU, "on-demand", "10").
+							Obj()).
+						Obj(), now).
+					Obj(),
+				*utiltestingapi.MakeWorkload("wl-a", "eng-alpha").
+					Queue("lq-a").
+					PodSets(*utiltestingapi.MakePodSet("one", 1).
+						Request(corev1.ResourceCPU, "5").
+						Obj()).
+					Condition(metav1.Condition{
+						Type:               kueue.WorkloadQuotaReserved,
+						Status:             metav1.ConditionTrue,
+						Reason:             "QuotaReserved",
+						Message:            "Quota reserved in ClusterQueue cq-a",
+						LastTransitionTime: metav1.NewTime(now),
+					}).
+					Condition(metav1.Condition{
+						Type:               kueue.WorkloadAdmitted,
+						Status:             metav1.ConditionTrue,
+						Reason:             "Admitted",
+						Message:            "The workload is admitted",
+						LastTransitionTime: metav1.NewTime(now),
+					}).
+					Admission(
+						utiltestingapi.MakeAdmission("cq-a").
+							PodSets(
+								utiltestingapi.MakePodSetAssignment("one").
+									Assignment(corev1.ResourceCPU, "on-demand", "5").
+									Count(1).
+									Obj(),
+							).
+							Obj(),
+					).
+					Obj(),
+				// wl-b should be left: Cohort-B has high DRS at root.
+				*utiltestingapi.MakeWorkload("wl-b", "eng-alpha").
+					Queue("lq-b").
+					PodSets(*utiltestingapi.MakePodSet("one", 1).
+						Request(corev1.ResourceCPU, "5").
+						Obj()).
+					Condition(metav1.Condition{
+						Type:               kueue.WorkloadQuotaReserved,
+						Status:             metav1.ConditionFalse,
+						Reason:             "Pending",
+						Message:            "Workload no longer fits after processing another workload",
+						LastTransitionTime: metav1.NewTime(now),
+					}).
+					ResourceRequests(kueue.PodSetRequest{
+						Name: "one",
+						Resources: corev1.ResourceList{
+							corev1.ResourceCPU: resource.MustParse("5"),
+						},
+					}).
+					Obj(),
+			},
+			wantAssignments: map[workload.Reference]kueue.Admission{
+				"eng-alpha/c0":   *utiltestingapi.MakeAdmission("cq-c").PodSets(utiltestingapi.MakePodSetAssignment("one").Assignment(corev1.ResourceCPU, "on-demand", "10").Obj()).Obj(),
+				"eng-alpha/wl-a": *utiltestingapi.MakeAdmission("cq-a").PodSets(utiltestingapi.MakePodSetAssignment("one").Assignment(corev1.ResourceCPU, "on-demand", "5").Count(1).Obj()).Obj(),
+			},
+			wantLeft: map[kueue.ClusterQueueReference][]workload.Reference{
+				"cq-b": {"eng-alpha/wl-b"},
+			},
+		},
 		// Cohort A provides 200 capacity, with 70 remaining.
 		// We denote Cohorts in UPPERCASE, and ClusterQueues
 		// in lowercase.

@@ -36,6 +36,7 @@ import (
 	awv1beta2 "github.com/project-codeflare/appwrapper/api/v1beta2"
 	rayv1 "github.com/ray-project/kuberay/ray-operator/apis/ray/v1"
 	"go.uber.org/zap/zaptest/observer"
+	"golang.org/x/sync/errgroup"
 	resourcev1 "k8s.io/api/resource/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	autoscaling "k8s.io/autoscaler/cluster-autoscaler/apis/provisioningrequest/autoscaling.x-k8s.io/v1"
@@ -59,6 +60,8 @@ import (
 	"sigs.k8s.io/kueue/client-go/clientset/versioned/scheme"
 	"sigs.k8s.io/kueue/test/util"
 )
+
+const crdInstallWorkerCount = 6
 
 type ManagerSetup func(context.Context, manager.Manager)
 
@@ -98,7 +101,7 @@ func (f *Framework) Init() *rest.Config {
 	ginkgo.By("bootstrapping test environment", func() {
 		baseCrdPath := filepath.Join(util.ProjectBaseDir, "config", "components", "crd", "_output")
 		f.testEnv = &envtest.Environment{
-			CRDDirectoryPaths:       append(f.DepCRDPaths, baseCrdPath),
+			CRDDirectoryPaths:       []string{baseCrdPath},
 			ErrorIfCRDPathMissing:   true,
 			ControlPlaneStopTimeout: 90 * time.Second,
 		}
@@ -131,10 +134,33 @@ func (f *Framework) Init() *rest.Config {
 		cfg, err = f.testEnv.Start()
 		gomega.ExpectWithOffset(1, err).NotTo(gomega.HaveOccurred())
 		gomega.ExpectWithOffset(1, cfg).NotTo(gomega.BeNil())
+
+		installDependencyCRDs(cfg, f.DepCRDPaths)
 	})
 	f.scheme = runtime.NewScheme()
 	gomega.ExpectWithOffset(1, clientgoscheme.AddToScheme(f.scheme)).NotTo(gomega.HaveOccurred())
 	return cfg
+}
+
+// installDependencyCRDs concurrently installs dependencies' CRDs.
+func installDependencyCRDs(cfg *rest.Config, crdPaths []string) {
+	if len(crdPaths) == 0 {
+		return
+	}
+	var eg errgroup.Group
+	eg.SetLimit(crdInstallWorkerCount)
+	for _, depPath := range crdPaths {
+		path := depPath
+		eg.Go(func() error {
+			_, err := envtest.InstallCRDs(cfg, envtest.CRDInstallOptions{
+				Paths:        []string{path},
+				PollInterval: 15 * time.Millisecond,
+				MaxTime:      30 * time.Second,
+			})
+			return err
+		})
+	}
+	gomega.ExpectWithOffset(2, eg.Wait()).NotTo(gomega.HaveOccurred())
 }
 
 func (f *Framework) SetupClient(cfg *rest.Config) (context.Context, client.WithWatch) {
